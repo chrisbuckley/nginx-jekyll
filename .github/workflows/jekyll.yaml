@@ -1,0 +1,66 @@
+name: Conditional Deploy to Server
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+      - feature/*
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Ruby
+        uses: actions/setup-ruby@v2
+        with:
+          ruby-version: 2.7
+
+      - name: Install dependencies
+        run: |
+          gem install bundler
+          bundle install
+
+      - name: Build Jekyll site
+        run: bundle exec jekyll build
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && (github.event_name != 'pull_request' || github.event.action == 'closed')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.5.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Deploy to server
+        run: |
+          if [[ -n $(git diff --name-only ${{ github.sha }}^ ${{ github.sha }} -- jekyll) ]]; then
+            case ${{ github.ref }} in
+              refs/heads/main)
+                rsync -avz --delete-after _site/ user@main-server-ip:/path/to/destination
+                ;;
+              refs/heads/staging)
+                rsync -avz --delete-after _site/ user@staging-server-ip:/path/to/destination
+                ;;
+              refs/heads/feature/*)
+                # Extract the feature branch name
+                feature_branch=$(echo "${{ github.ref }}" | sed 's/refs\/heads\/feature\///')
+                rsync -avz --delete-after _site/ user@feature-server-ip:/path/to/destination/${feature_branch}
+                ;;
+              *)
+                echo "No deployment configured for this branch."
+                ;;
+            esac
+          else
+            echo "No changes in the 'jekyll' folder. Skipping deployment."
+          fi

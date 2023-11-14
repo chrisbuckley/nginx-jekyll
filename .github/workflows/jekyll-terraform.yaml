@@ -1,0 +1,46 @@
+name: Redeploy Jekyll After Terraform Update
+
+# Trigger the workflow when the "terraform" workflow is completed
+on:
+  workflow_run:
+    workflows: ["terraform"]
+    types:
+      - completed
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # Run the job if either the "terraform" workflow completed successfully
+    # or it's a direct push event (not a pull request)
+    if: github.event.workflow_run.conclusion == 'success' || (github.event_name == 'push' && github.event_name != 'pull_request')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.5.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Deploy to server
+        run: |
+          # Deploy to different servers based on the branch name
+          case ${{ github.ref }} in
+            refs/heads/main)
+              rsync -avz --delete-after _site/ user@main-server-ip:/path/to/destination
+              ;;
+            refs/heads/staging)
+              rsync -avz --delete-after _site/ user@staging-server-ip:/path/to/destination
+              ;;
+            refs/heads/feature/*)
+              # Extract the feature branch name
+              feature_branch=$(echo "${{ github.ref }}" | sed 's/refs\/heads\/feature\///')
+              rsync -avz --delete-after _site/ user@feature-server-ip:/path/to/destination/${feature_branch}
+              ;;
+            *)
+              # If the branch is not explicitly handled, skip deployment
+              echo "No deployment configured for this branch."
+              ;;
+          esac
